@@ -5,5 +5,6 @@ from backend import views
 
 urlpatterns = [
     path('hello/', views.hello),
+    path('predict', views.predict),
 
 ]
