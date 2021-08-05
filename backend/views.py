@@ -29,6 +29,16 @@ def hello(request):
     resp['data'] = "aaa"
     return HttpResponse(json.dumps(resp), content_type="application/json")
 
+
+def getpoint(request):
+    print(request)
+    resp = {'message': "success", 'result': 'ok'}
+    resp['message'] = 'getpoint'
+    resp['result'] = 'ok'
+    resp['data'] = 6
+    return HttpResponse(json.dumps(resp), content_type="application/json")
+
+
 def predict(request):
 
     params = request.GET;
