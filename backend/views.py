@@ -3,22 +3,9 @@ from django.shortcuts import render
 # Create your views here.
 import json
 from django.http import HttpResponse
-
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
-import argparse
 import sys
 sys.path.append("..")
-from common import utils
-from common import datasets
-from common.resnet_1 import ResNet50
 from common.resnet_1 import ResNet18
-from common.vgg import VGG
-import os
-import numpy as np
 import datetime
 import torch
 import torch.nn as nn
@@ -26,8 +13,6 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 import argparse
-import sys
-sys.path.append("..")
 from common.utils import generateReverseParamsResnet18
 from common.resnet_for_mnist import ResNet18
 import os
@@ -36,6 +21,7 @@ from common.lr_scheduler_temp import ReduceLROnPlateau
 from torchvision.datasets import MNIST
 from torch.utils.data import DataLoader
 from torchvision.transforms import ToTensor
+import math
 
 
 def hello(request):
@@ -118,9 +104,9 @@ def getDataset():
     return train_ds, test_ds
 
 
-def getDataloader(trainset, testset):
-    trainloader = DataLoader(trainset, batch_size=64, shuffle=True)
-    testloader = DataLoader(testset, batch_size=64)
+def getDataloader(trainset, testset, batch_size):
+    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+    testloader = DataLoader(testset, batch_size=batch_size)
     return trainloader, testloader
 
 
@@ -152,107 +138,32 @@ def getOptimizer(net, LR):
     return torch.optim.RMSprop(net.parameters(), lr=LR)
 
 
-def testRetain():
-    # 每训练完一个epoch测试一下准确率
-    print("Waiting Test!")
-    with open(fileAccName, "a+") as f:
-        with torch.no_grad():
-            correct = 0.0
-            total = 0.0
-            sum_loss = 0
-            for iTest, data in enumerate(testloader):
-                net.eval()
-                images, labels = data
-                images, labels = images.to(device), labels.to(device)
-                outputs = net(images)
-                loss = criterion(outputs, labels)
-                sum_loss += loss.item()
-                # 取得分最高的那个类 (outputs.data的索引号)
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum()
-                lastLoss = sum_loss / (iTest + 1)
-            print('测试分类准确率为：%.3f%%, 当前学习率： %.3f, last loss: %.3f' % (
-                100. * correct / total, optimizer.state_dict()['param_groups'][0]['lr'], lastLoss))
-            acc = 100. * correct / total
-            f.write("EPOCH=%03d,Accuracy= %.3f%%,Time=%s,LR=%.6f,BATCH_SIZE:%d,lastLoss:%.3f" % (
-                epoch + 1, acc, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-                optimizer.state_dict()['param_groups'][0]['lr'], BATCH_SIZE, lastLoss))
-            f.write('\n')
-            f.flush()
-
-def saveBestModel():
-    # 将每次测试结果实时写入acc.txt文件中
-    with open(fileAccName, "a+") as f:
-        if acc > best_acc:
-            best_acc = acc
-            print('Saving best acc model......')
-            torch.save(net.state_dict(), '%s/%s_best_acc_model.pth' % (
-                args.outf, param))
-            f.write("save best model\n")
-            f.flush()
-
-
-def saveRecoveryModel():
-    if (epoch + 1) % saveModelSpan < 1:
-        print('Saving model......')
-        torch.save(net.state_dict(), '%s/%s_%03d_epoch.pth' % (
-            args.outf, param.replace("before", "after"), epoch + 1))
-
-
-def testForget():
+def testAcc(net, testloader, criterion, device):
     correct = 0.0
     total = 0.0
-    with torch.no_grad():
-        with open(fileAccName, "a+") as f:
-            for iTestForget, data in enumerate(forgetTestLoader):
-                net.eval()
-                images, labels = data
-                images, labels = images.to(device), labels.to(device)
-                outputs = net(images)
-                # 取得分最高的那个类 (outputs.data的索引号)
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum()
-            acc = 100. * correct / total
-            print('遗忘集测试分类准确率为：%.3f%%' % acc)
-            f.write('遗忘集测试分类准确率为：%.3f%%' % acc)
-            f.write('\n')
-            f.flush()
+    sum_loss = 0
+    for iTest, data in enumerate(testloader):
+        net.eval()
+        images, labels = data
+        images, labels = images.to(device), labels.to(device)
+        outputs = net(images)
+        loss = criterion(outputs, labels)
+        sum_loss += loss.item()
+        # 取得分最高的那个类 (outputs.data的索引号)
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum()
+    return correct / total, sum_loss / len(testloader)
 
 
-def checkLoss():
-    with open(fileAccName, "a+") as f:
-        if lastTrainLoss < T_threshold and epoch > tolerate:
-            print('train loss达到限值%s，提前退出' % lastTrainLoss)
-            print('Saving model......')
-            torch.save(net.state_dict(),
-                       '%s/%s_%03d_epoch.pth' % (args.outf, param.replace("before", "after"), epoch + 1))
-            f.write("train loss达到限值%s，提前退出" % lastTrainLoss)
-            f.write('\n')
-            f.flush()
-            return True
-        return False
-
-
-def checkLR():
-    with open(fileAccName, "a+") as f:
-        if optimizer.state_dict()['param_groups'][0]['lr'] < 0.003:
-            print("学习率过小，退出")
-            f.write("学习率过小，退出")
-            f.write('\n')
-            f.flush()
-            return True
-        return False
-
-def train(net, trainloader, testloader, frozenList, pre_epoch, EPOCH, preModel, device, optimizer, criterion, logName, pthName ):
-    print(param)
+def train(net, trainloader, testloader, forgetTestLoader, frozenList, pre_epoch, EPOCH, preModel, device, optimizer, criterion, logName, pthName):
+    print(preModel)
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True,
                                   threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0,
                                   eps=1e-08)
-    fileName = filePath + param
-    checkpoint = torch.load(preModel)
-    net.load_state_dict(checkpoint)
+    if preModel != "":
+        checkpoint = torch.load(preModel)
+        net.load_state_dict(checkpoint)
     fileAccName = logName + "_acc.txt"
     fileLogName = logName + "_log.txt"
     # 冻结相关层
@@ -272,80 +183,116 @@ def train(net, trainloader, testloader, frozenList, pre_epoch, EPOCH, preModel, 
     print("Start Training, Resnet-18!")  # 定义遍历数据集的次数
     best_acc = 0
     tolerate = 10
+    saveModelSpan = 10
+    T_threshold = 0.0111
 
-    with open(fileLogName, "a+")as f2:
-        for epoch in range(pre_epoch, EPOCH):
-            print('\nEpoch: %d' % (epoch + 1))
-            net.train()
-            sum_loss = 0.0
-            correct = 0.0
-            total = 0.0
-            lastLoss = 0.0
-            for i, data in enumerate(trainloader, 0):
-                # 准备数据
-                length = len(trainloader)
-                inputs, labels = data
-                inputs, labels = inputs.to(device), labels.to(device)
-                optimizer.zero_grad()
+    bestModel = None
+    with open(fileAccName, "a+")as f:
+        with open(fileLogName, "a+")as f2:
+            for epoch in range(pre_epoch, EPOCH):
+                print('\nEpoch: %d' % (epoch + 1))
+                net.train()
+                sum_loss = 0.0
+                correct = 0.0
+                total = 0.0
+                for i, data in enumerate(trainloader, 0):
+                    # 准备数据
+                    length = len(trainloader)
+                    inputs, labels = data
+                    inputs, labels = inputs.to(device), labels.to(device)
+                    optimizer.zero_grad()
 
-                # forward + backward
-                outputs = net(inputs)
-                loss = criterion(outputs, labels)
-                loss.backward()
-                optimizer.step()
+                    # forward + backward
+                    outputs = net(inputs)
+                    loss = criterion(outputs, labels)
+                    loss.backward()
+                    optimizer.step()
 
-                # 每训练1个batch打印一次loss和准确率
-                sum_loss += loss.item()
-                _, predicted = torch.max(outputs.data, 1)
-                total += labels.size(0)
-                correct += predicted.eq(labels.data).cpu().sum()
-                lastTrainLoss = sum_loss / (i + 1)
-                print('[epoch:%d, iter:%d] Loss: %.03f | Acc: %.3f%% | Time: %s | File: %s | LR: %.6f'
-                      % (epoch + 1, (i + 1 + epoch * length), sum_loss / (i + 1), 100. * correct / total,
-                         time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()), param,
-                         optimizer.state_dict()['param_groups'][0]['lr']))
-                f2.write('%03d  %05d |Loss: %.03f | Acc: %.3f%% | Time: %s | LR: %.6f'
-                         % (epoch + 1, (i + 1 + epoch * length), sum_loss / (i + 1), 100. * correct / total,
-                            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-                            optimizer.state_dict()['param_groups'][0]['lr']))
-                f2.write('\n')
-                f2.flush()
-            # 保留集测试准确率
-            testRetain()
-            # 保存模型
-            saveBestModel()
-            saveRecoveryModel()
-            # 遗忘集测试准确率
-            testForget()
-            scheduler.step(lastLoss, epoch=epoch)
-            # 检查loss是否达到阈值，如果达到阈值则停止训练
-            if checkLoss():
-                break
-            # 检查学习率lr是否达到阈值，如果达到阈值则停止训练
-            if checkLR():
-                break
+                    # 每训练1个batch打印一次loss和准确率
+                    sum_loss += loss.item()
+                    _, predicted = torch.max(outputs.data, 1)
+                    total += labels.size(0)
+                    correct += predicted.eq(labels.data).cpu().sum()
+                    lastTrainLoss = sum_loss / (i + 1)
+                    print('[epoch:%d, iter:%d] Loss: %.03f | Acc: %.3f%% | Time: %s | File: %s | LR: %.6f'
+                          % (epoch + 1, (i + 1 + epoch * length), sum_loss / (i + 1), 100. * correct / total,
+                             time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()), preModel,
+                             optimizer.state_dict()['param_groups'][0]['lr']))
+                    f2.write('%03d  %05d |Loss: %.03f | Acc: %.3f%% | Time: %s | LR: %.6f'
+                             % (epoch + 1, (i + 1 + epoch * length), sum_loss / (i + 1), 100. * correct / total,
+                                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+                                optimizer.state_dict()['param_groups'][0]['lr']))
+                    f2.write('\n')
+                    f2.flush()
+                f.write("last train loss: %.4f\n" % lastTrainLoss)
+                f.flush()
+                # 保留集测试和遗忘集测试准确率
+                print("Waiting Test!")
+                with torch.no_grad():
+                    testRetainAcc, testLoss = testAcc(net, testloader, criterion, device)
+                    testForgetAcc, testForgetLoss = testAcc(net, forgetTestLoader, criterion, device)
+                    print('测试分类准确率为：%.3f%%, 当前学习率： %.3f, last loss: %.3f' % (
+                        100. * testRetainAcc, optimizer.state_dict()['param_groups'][0]['lr'], testLoss))
+                    f.write("EPOCH=%03d,Accuracy= %.3f%%,Time=%s,LR=%.6f,train BATCH_SIZE:%d,lastLoss:%.3f\n" % (
+                        epoch + 1, 100. * testRetainAcc, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+                        optimizer.state_dict()['param_groups'][0]['lr'], trainloader.batch_size, testLoss))
+                    print('遗忘集测试分类准确率为：%.3f%%' % testForgetAcc)
+                    f.write('遗忘集测试分类准确率为：%.3f%%\n' % testForgetAcc)
+                    f.flush()
+                scheduler.step(testLoss, epoch=epoch)
+                # 保存模型
+                if testRetainAcc > best_acc:
+                    best_acc = testRetainAcc
+                    print('Saving best acc model......')
+                    bestModelName = pthName+"_best_acc_model.pth"
+                    torch.save(net.state_dict(), 'model/%s' % bestModelName)
+                    f.write("save best model\n")
+                    f.flush()
+                if (epoch + 1) % saveModelSpan < 1:
+                    print('Saving model......')
+                    torch.save(net.state_dict(), '%s_%03d_epoch.pth' % (pthName + preModel.replace("before", "after"), epoch + 1))
+                # 检查loss是否达到阈值，如果达到阈值则停止训练
+                if lastTrainLoss < T_threshold and epoch > tolerate:
+                    print('train loss达到限值%s，提前退出' % lastTrainLoss)
+                    print('Saving model......')
+                    torch.save(net.state_dict(), '%s_%03d_epoch.pth' % (pthName + preModel.replace("before", "after"), epoch + 1))
+                    f.write("train loss %s 达到限值，提前退出\n" % lastTrainLoss)
+                    f.flush()
+                    break
+                # 检查学习率lr是否达到阈值，如果达到阈值则停止训练
+                with open(fileAccName, "a+") as f:
+                    if optimizer.state_dict()['param_groups'][0]['lr'] < 0.003:
+                        print("学习率过小，退出")
+                        f.write("学习率过小，退出\n")
+                        f.flush()
+                        break
 
-        print('Saving model......')
-        torch.save(net.state_dict(), '%s_%03d_epoch.pth' % (pthName, epoch + 1))
-        print("Training Finished, TotalEPOCH=%d" % EPOCH)
+            print('Saving model......')
+            torch.save(net.state_dict(), '%s_%03d_epoch.pth' % (pthName, epoch + 1))
+            print("Training Finished, TotalEPOCH=%d" % EPOCH)
+            return bestModel
 
-def getpoint(request):
+# def getpoint(request):
+def getpoint():
+    print("get point start")
     # 解析请求
-    print(request.body)
-    body = request.body
-    params = json.loads(body)
-    structure = params['selectedStructure']
-    initModel = params['selectedInitModel']
-    normalModel = params['selectedNormalModel']
-    modelName, dataset = structure.split('+')
-    print(modelName)
-    print(dataset)
-    print(initModel)
-    print(normalModel)
+    # print(request.body)
+    # body = request.body
+    # params = json.loads(body)
+    # structure = params['selectedStructure']
+    # initModel = params['selectedInitModel']
+    # normalModel = params['selectedNormalModel']
+    # modelName, dataset = structure.split('+')
+    # print(modelName)
+    # print(dataset)
+    # print(initModel)
+    # print(normalModel)
 
     # 定义是否使用GPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    cuda = torch.cuda.is_available()
+    if cuda:
+        print("torch.backends.cudnn.version: {}".format(torch.backends.cudnn.version()))
     fileRoot = getFilerootName()
     layeredParams = getLayeredParams()
 
@@ -354,64 +301,56 @@ def getpoint(request):
     parser.add_argument('--outf', default=fileRoot + '/model/', help='folder to output images and model checkpoints')  # 输出结果保存路径
     parser.add_argument('--gpu', type=int, default=0)
     args = parser.parse_args()
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-    cuda = torch.cuda.is_available()
-    if cuda:
-        print("torch.backends.cudnn.version: {}".format(torch.backends.cudnn.version()))
-    # 超参数设置
-    EPOCH = 10  # 遍历数据集次数
-    pre_epoch = 0  # 定义已经遍历数据集的次数
-    # BATCH_SIZE = 128      #批处理尺寸(batch_size)
-    BATCH_SIZE = 32  # 批处理尺寸(batch_size)
-    LR = 0.005  # 学习率
-    T_threshold = 0.0111
-    saveModelSpan = 10
-    tolerate = 10
-    # 定义损失函数和优化方式
-    criterion = nn.CrossEntropyLoss()  # 损失函数为交叉熵，多用于多分类问题
     filePath = fileRoot + "/model/"
     initModel = "resnet18_mnist_noraml_train_init.pth"
     finishedModel = "resnet18_mnist_normal_train_20.pth"
     strucName = 'resnet18_'
-    datasetName = 'mnist_forget_one_kind_'
+    datasetName = 'mnist_'
+    methodName = "reverse_forget_one_kind_reset_"
+    logName = filePath + strucName + datasetName + methodName
+    pthName = filePath + strucName + datasetName + methodName
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
 
-    # 准备数据集并预处理
+    # 超参数设置
+    EPOCH = 10  # 遍历数据集次数
+    pre_epoch = 0  # 定义已经遍历数据集的次数
+    BATCH_SIZE = 32  # 批处理尺寸(batch_size)
+    LR = 0.005  # 学习率
+    accThreshold = 0.01
+    criterion = nn.CrossEntropyLoss() # 定义损失函数和优化方式，损失函数为交叉熵，多用于多分类问题
     forget = [3]
 
     # 获取数据集
     train_ds, test_ds = getDataset()
     # 获取保留训练集、保留测试集、遗忘训练集、遗忘测试集
     trainRetain, trainForget, testRetain, testForget = getSplitDataset(train_ds, test_ds, forget)
-    trainloader, testloader = getDataloader(trainRetain, testRetain)
-    forgetTestLoader = DataLoader(testForget, batch_size=64, shuffle=True)
+    trainloader, testloader = getDataloader(trainRetain, testRetain, BATCH_SIZE)
+    forgetTestLoader = DataLoader(testForget, batch_size=BATCH_SIZE, shuffle=True)
 
     # 模型定义-ResNet
     net = ResNet18().to(device)
-
-    # checkpoint = torch.load(r"D:\ww2\graduate_expriment\resnet18-vggface100-2\model\resnet18_vggface100_reverse_reset_former_13_before_training.pth_best_acc_model_20210706.pth", map_location='cpu')
-    # checkpoint = torch.load(r"D:\ww2\graduate_expriment\resnet18-vggface100-2\model\resnet18_vggface100_normal_train_080_epoch.pth", map_location='cpu')
-    # checkpoint = torch.load(r"D:\ww2\graduate_expriment\resnet18-vggface100-2\model\resnet18_vgg100_normal_init.pth", map_location='cpu')
-    # net.load_state_dict(checkpoint)
-    # paramsparams = net.state_dict()
-    # for k, v in paramsparams.items():
-    #     if k == 'layer4.0.left.0.weight':
-    #         print(k)  # 打印网络中的变量名
-    #         print(v)
-    #         break
-    # exit()
-
-    paramList, freezeParamList = generateReverseParamsResnet18(net, initModel, finishedModel, layeredParams, filePath,
-                                                               strucName, datasetName, range(13, 15))
-    print("begin cycle")
-    for paramIndex, param in enumerate(paramList):
+    # 二分寻找分层点
+    head = 1
+    tail = 18
+    while head < tail-1:
+        mid = math.ceil((head + tail) / 2.)
+        print([head,mid,tail])
+        paramList, freezeParamList = generateReverseParamsResnet18(net, initModel, finishedModel, layeredParams,
+                                                                   filePath, strucName, datasetName, [mid])
+        param = paramList[0]
         optimizer = getOptimizer(net, LR)
-        train(net, trainloader, testloader, freezeParamList[paramIndex], pre_epoch, EPOCH, param, device, optimizer, criterion, logName, pthName )
-
+        model = train(net, trainloader, testloader, forgetTestLoader, freezeParamList[0], pre_epoch, EPOCH, param, device, optimizer, criterion, logName, pthName )
+        print(model)
+        return
+        acc, _ = testAcc(model, forgetTestLoader, criterion, device)
+        if acc > 1:
+            acc /= 100
+        if acc < accThreshold:
+            tail = mid
+        else:
+            head = mid
     # 返回
-    resp = {'message': "success", 'result': 'ok'}
-    resp['message'] = 'getpoint'
-    resp['result'] = 'ok'
-    resp['data'] = 6
+    resp = {'message': "success", 'result': 'ok', 'data': 19-tail}
     return HttpResponse(json.dumps(resp), content_type="application/json")
 
 
