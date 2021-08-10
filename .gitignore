@@ -7,3 +7,5 @@ __pycache__/
 .DS_Store
 model/
 backend/mnist/
+cifar10/
+mnist/

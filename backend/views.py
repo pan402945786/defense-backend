@@ -14,21 +14,152 @@ import torchvision
 import torchvision.transforms as transforms
 import argparse
 from common.utils import generateReverseParamsResnet18
-from common.resnet_for_mnist import ResNet18
+from common.resnet_for_mnist import ResNet18 as MNISTResNet18
+from common.resnet_1 import ResNet18 as CIFARResNet18
 import os
 import time
 from common.lr_scheduler_temp import ReduceLROnPlateau
 from torchvision.datasets import MNIST
+from torchvision.datasets import CIFAR10
 from torch.utils.data import DataLoader
 from torchvision.transforms import ToTensor
 import math
 
+# 定义是否使用GPU
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+cuda = torch.cuda.is_available()
+if cuda:
+    print("torch.backends.cudnn.version: {}".format(torch.backends.cudnn.version()))
 
 def hello(request):
     resp = {'message': "success", 'result': 'ok'}
     resp['message'] = 'aaddDa'
     resp['result'] = 'ok'
     resp['data'] = "aaa"
+    return HttpResponse(json.dumps(resp), content_type="application/json")
+
+
+def getModelList(request):
+    filePath = r'D:\www\defense-backend\backend\model'
+    fileList = os.listdir(filePath)
+    print(fileList)
+    resp = {'message': "success", 'result': 'ok', 'data': fileList}
+    return HttpResponse(json.dumps(resp), content_type="application/json")
+
+
+def generateParamsResnet18(net, former, later, layeredParams, filePath, strucName, datasetName, layer):
+    # 模型定义-ResNet
+    # net = ResNet18().to(device)
+    checkpoint = torch.load(filePath+former, map_location='cpu')
+    net.load_state_dict(checkpoint)
+    params = net.state_dict()
+    toLoad = params
+    checkpoint = torch.load(filePath+later, map_location='cpu')
+    fileNameList = []
+    freezeParamsList = []
+    for i, params in enumerate(layeredParams):
+        if i + 1 in layer:
+            newLayerParams = []
+            for j in range(i+1):
+                newLayerParams = newLayerParams + layeredParams[len(layeredParams)-j-1]
+            freezeParams = []
+
+            for j in range(len(layeredParams) - i - 1):
+                freezeParams = freezeParams + layeredParams[j]
+            resetLayerName = "reset_" + str(i+1) + "_"
+            fileName = strucName+datasetName+resetLayerName+"before_training.pth"
+            for k in checkpoint.keys():
+                if k in newLayerParams:
+                    toLoad[k] = checkpoint[k]
+                    # print("added:" + k)
+            net.load_state_dict(toLoad)
+            print('Saving model:'+fileName)
+            torch.save(net.state_dict(), '%s/%s' % (filePath, fileName))
+            fileNameList.append(fileName)
+            freezeParamsList.append(freezeParams)
+    return fileNameList, freezeParamsList
+
+
+def resetparam(request):
+    print("get point start")
+    # 解析请求
+    print(request.body)
+    body = request.body
+    params = json.loads(body)
+    structure = params['selectedStructure']
+    initModel = params['selectedInitModel']
+    normalModel = params['selectedNormalModel']
+    resetNumber = params['resetNumber']
+    modelName, dataset = structure.split('+')
+    print(modelName)
+    print(dataset)
+    print(initModel)
+    print(normalModel)
+    print(resetNumber)
+    net = getNet(dataset)
+    layeredParams = getLayeredParams()
+    fileRoot = getFilerootName()
+    filePath = fileRoot + "/model/"
+    fileNameList, freezeParamsList = generateParamsResnet18(net, normalModel, initModel, layeredParams, filePath, modelName+"_", dataset+"_", [resetNumber])
+    resp = {'message': "success", 'result': 'ok', 'data': fileNameList[0]}
+    return HttpResponse(json.dumps(resp), content_type="application/json")
+
+
+def forgettrain(request):
+    print("forget train start")
+    # 解析请求
+    print(request.body)
+    body = request.body
+    params = json.loads(body)
+    structure = params['selectedStructure']
+    resetModel = params['selectedResetModel']
+    forgetKinds = params['forgetKinds']
+    modelName, dataset = structure.split('+')
+    forgetList = forgetKinds.split('-')
+    forgetList = list(map(int, forgetList))
+    print(modelName)
+    print(dataset)
+    print(resetModel)
+    print(forgetList)
+    fileRoot = getFilerootName()
+    # 参数设置,使得我们能够手动输入命令行参数，就是让风格变得和Linux命令行差不多
+    filePath = fileRoot + "/model/"
+    logPath = fileRoot + "/logs/"
+    strucName = 'resnet18_'
+    datasetName = dataset + '_'
+    methodName = "forget_" + forgetKinds + "_kind_"
+    logName = logPath + strucName + datasetName + methodName + "_test2_"
+    pthName = filePath + strucName + datasetName + methodName + "_test2_"
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
+    # 超参数设置
+    if dataset == 'MNIST':
+        EPOCH = 10  # 遍历数据集次数
+        LR = 0.005  # 学习率
+    else:
+        EPOCH = 30
+        LR = 0.1  # 学习率
+    pre_epoch = 0  # 定义已经遍历数据集的次数
+    BATCH_SIZE = 32  # 批处理尺寸(batch_size)
+    accThreshold = 0.01
+    criterion = nn.CrossEntropyLoss()  # 定义损失函数和优化方式，损失函数为交叉熵，多用于多分类问题
+
+    # 获取数据集
+    train_ds, test_ds = getDataset(dataset)
+    # 获取保留训练集、保留测试集、遗忘训练集、遗忘测试集
+    trainRetain, trainForget, testRetain, testForget = getSplitDataset(train_ds, test_ds, forgetList)
+    trainloader, testloader = getDataloader(trainRetain, testRetain, BATCH_SIZE)
+    forgetTestLoader = DataLoader(testForget, batch_size=BATCH_SIZE, shuffle=True)
+    print('after loader')
+    # 模型定义-ResNet
+    net = getNet(dataset)
+    optimizer = getOptimizer(net, LR)
+    print('before train')
+    model, _, forgetTestAcc = train(net, trainloader, testloader, forgetTestLoader, [], pre_epoch,
+                                    EPOCH, resetModel, device, optimizer, criterion, filePath, logName, pthName)
+    if forgetTestAcc > 1:
+        forgetTestAcc /= 100
+    resp = {'message': "forgettrain", 'result': 'ok', 'data': model}
     return HttpResponse(json.dumps(resp), content_type="application/json")
 
 
@@ -56,7 +187,8 @@ def getFilerootName():
     # testFile = r"\test_list_100.txt"
 
     # 自己电脑
-    fileRoot = r'D:\www\graduate_expriment\resnet18-mnist'
+    fileRoot = r"D:\www\defense-backend\backend"
+    # fileRoot = r'D:\www\graduate_expriment\resnet18-mnist'
     # dataRoot = r'D:\www\graduate_expriment\resnet18_vggface2'
     # datasetRoot = r'\datasets\data\root'
     return fileRoot
@@ -96,10 +228,15 @@ def getLayeredParams():
     return layeredParams
 
 
-def getDataset():
-    train_ds = MNIST("mnist", train=True, download=True, transform=ToTensor())
+def getDataset(dataset):
+    if dataset == 'MNIST':
+        train_ds = MNIST("mnist", train=True, download=True, transform=ToTensor())
+        test_ds = MNIST("mnist", train=False, download=True, transform=ToTensor())
+    else:
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,), (0.5))])
+        train_ds = CIFAR10('cifar10', download=True, train=True, transform=transform)
+        test_ds = CIFAR10('cifar10', download=True, train=False, transform=transform)
     print(len(train_ds))
-    test_ds = MNIST("mnist", train=False, download=True, transform=ToTensor())
     print(len(test_ds))
     return train_ds, test_ds
 
@@ -156,6 +293,13 @@ def testAcc(net, testloader, criterion, device):
     return correct / total, sum_loss / len(testloader)
 
 
+def getNet(dataset):
+    if dataset == 'MNIST':
+        net = MNISTResNet18().to(device)
+    else:
+        net = CIFARResNet18().to(device)
+    return net
+
 def train(net, trainloader, testloader, forgetTestLoader, frozenList, pre_epoch, EPOCH, preModel, device, optimizer, criterion, filePath, logName, pthName):
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True,
                                   threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0,
@@ -195,8 +339,8 @@ def train(net, trainloader, testloader, forgetTestLoader, frozenList, pre_epoch,
                 correct = 0.0
                 total = 0.0
                 for i, data in enumerate(trainloader, 0):
-                    # if i > len(trainloader) * 0.1:
-                    #     break
+                    if i > len(trainloader) * 0.01:
+                        break
                     # 准备数据
                     length = len(trainloader)
                     inputs, labels = data
@@ -272,63 +416,63 @@ def train(net, trainloader, testloader, forgetTestLoader, frozenList, pre_epoch,
             print("Training Finished, TotalEPOCH=%03d" % (epoch+1))
             return bestModelName, best_acc, testForgetAcc
 
-# def getpoint(request):
-def getpoint():
+def getpoint(request):
+# def getpoint():
     print("get point start")
     # 解析请求
-    # print(request.body)
-    # body = request.body
-    # params = json.loads(body)
-    # structure = params['selectedStructure']
-    # initModel = params['selectedInitModel']
-    # normalModel = params['selectedNormalModel']
-    # modelName, dataset = structure.split('+')
-    # print(modelName)
-    # print(dataset)
-    # print(initModel)
-    # print(normalModel)
+    print(request.body)
+    body = request.body
+    params = json.loads(body)
+    structure = params['selectedStructure']
+    initModel = params['selectedInitModel']
+    normalModel = params['selectedNormalModel']
+    modelName, dataset = structure.split('+')
+    print(modelName)
+    print(dataset)
+    print(initModel)
+    print(normalModel)
 
-    # 定义是否使用GPU
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    cuda = torch.cuda.is_available()
-    if cuda:
-        print("torch.backends.cudnn.version: {}".format(torch.backends.cudnn.version()))
     fileRoot = getFilerootName()
     layeredParams = getLayeredParams()
 
     # 参数设置,使得我们能够手动输入命令行参数，就是让风格变得和Linux命令行差不多
-    parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-    parser.add_argument('--outf', default=fileRoot + '/model/', help='folder to output images and model checkpoints')  # 输出结果保存路径
-    parser.add_argument('--gpu', type=int, default=0)
-    args = parser.parse_args()
     filePath = fileRoot + "/model/"
-    initModel = "resnet18_mnist_noraml_train_init.pth"
-    finishedModel = "resnet18_mnist_normal_train_20.pth"
+    logPath = fileRoot + "/logs/"
+    if dataset == 'MNIST':
+        initModel = "resnet18_mnist_noraml_train_init.pth"
+        finishedModel = "resnet18_mnist_normal_train_20.pth"
+    else:
+        initModel = "resnet18_cifar10_noraml_train_init.pth"
+        finishedModel = "resnet18_cifar10_normal_train_finished_saving_60.pth"
     strucName = 'resnet18_'
-    datasetName = 'mnist_'
+    datasetName = dataset+'_'
     methodName = "reverse_forget_one_kind_reset_"
-    logName = filePath + strucName + datasetName + methodName + "_test_"
-    pthName = filePath + strucName + datasetName + methodName + "_test_"
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
+    logName = logPath + strucName + datasetName + methodName + "_test1_"
+    pthName = filePath + strucName + datasetName + methodName + "_test1_"
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
     # 超参数设置
-    EPOCH = 10  # 遍历数据集次数
+    if dataset == 'MNIST':
+        EPOCH = 10  # 遍历数据集次数
+        LR = 0.005  # 学习率
+    else:
+        EPOCH = 30
+        LR = 0.1  # 学习率
     pre_epoch = 0  # 定义已经遍历数据集的次数
     BATCH_SIZE = 32  # 批处理尺寸(batch_size)
-    LR = 0.005  # 学习率
     accThreshold = 0.01
     criterion = nn.CrossEntropyLoss() # 定义损失函数和优化方式，损失函数为交叉熵，多用于多分类问题
     forget = [3]
 
     # 获取数据集
-    train_ds, test_ds = getDataset()
+    train_ds, test_ds = getDataset(dataset)
     # 获取保留训练集、保留测试集、遗忘训练集、遗忘测试集
     trainRetain, trainForget, testRetain, testForget = getSplitDataset(train_ds, test_ds, forget)
     trainloader, testloader = getDataloader(trainRetain, testRetain, BATCH_SIZE)
     forgetTestLoader = DataLoader(testForget, batch_size=BATCH_SIZE, shuffle=True)
 
     # 模型定义-ResNet
-    net = ResNet18().to(device)
+    net = getNet(dataset)
     # 二分寻找分层点
     head = 1
     tail = 18

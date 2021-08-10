@@ -2,7 +2,9 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="9e385afa-30f5-4bf2-9287-d4648cbe4ace" name="Default Changelist" comment="">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/urls.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/urls.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backend/views.py" beforeDir="false" afterPath="$PROJECT_DIR$/backend/views.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -88,9 +90,14 @@
   </component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\www\defense-backend\backend\model" />
       <recent name="D:\www\defense-backend\common" />
       <recent name="D:\ww2\defense-backend\model" />
       <recent name="D:\ww2\defense-backend" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="D:\www\defense-backend\backend\model" />
+      <recent name="D:\www\defense-backend\backend\savedModels" />
     </key>
   </component>
   <component name="RunManager" selected="Python.tests">
@@ -210,7 +217,10 @@
       <workItem from="1628078129596" duration="19000" />
       <workItem from="1628152307024" duration="11142000" />
       <workItem from="1628217911350" duration="16385000" />
-      <workItem from="1628310845205" duration="5532000" />
+      <workItem from="1628310845205" duration="7958000" />
+      <workItem from="1628394484453" duration="6272000" />
+      <workItem from="1628478823959" duration="3997000" />
+      <workItem from="1628585491027" duration="9356000" />
     </task>
     <servers />
   </component>
