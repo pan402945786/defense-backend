@@ -39,6 +39,116 @@ def hello(request):
     return HttpResponse(json.dumps(resp), content_type="application/json")
 
 
+def getModelResult(request):
+    print(request.body)
+    params = json.loads(request.body)
+    structure = params['selectedStructure']
+    selectedLRFModel = params['selectedLRFModel']
+    selectedCompareModel = params['selectedCompareModel']
+    pictures = params['pictures']
+    modelName, dataset = structure.split('+')
+    print(structure)
+    print(selectedLRFModel)
+    print(selectedCompareModel)
+    splitDatasetByKind = {}
+    train_ds, test_ds = getDataset(dataset)
+    for i, item in enumerate(test_ds):
+        data, label = item
+        if splitDatasetByKind.get(label) is None:
+            splitDatasetByKind[label] = [item]
+        else:
+            splitDatasetByKind[label].append(item)
+    resp = {'message': "success", 'result': 'ok', 'data': "aaa"}
+    return HttpResponse(json.dumps(resp), content_type="application/json")
+
+
+def getPictureResult(request):
+    print(request.body)
+    params = json.loads(request.body)
+    structure = params['selectedStructure']
+    selectedLRFModel = params['selectedLRFModel']
+    selectedCompareModel = params['selectedCompareModel']
+    pictures = params['pictures']
+    modelName, dataset = structure.split('+')
+    print(structure)
+    print(selectedLRFModel)
+    print(selectedCompareModel)
+    train_ds, test_ds = getDataset(dataset)
+
+    # b = [i[1] for i in testList]
+    # print(b)
+
+    modelList = [selectedLRFModel, selectedCompareModel]
+    fileRoot = getFilerootName()
+    filePath = fileRoot + "/model/"
+    results = []
+    item = {
+        "name": "",
+        "lrf_predict": "",
+        "compare_predict": "",
+        "lrf_vector": [],
+        "compare_vector": [],
+    }
+    # 准备测试数据
+    testList = []
+    for i in range(len(pictures)):
+        index, _ = pictures[i].split('.')
+        testList.append(test_ds[int(index)])
+
+    dataLoader = DataLoader(testList, batch_size=100, shuffle=False)
+    print(len(dataLoader.dataset))
+
+    net = getNet(dataset)
+
+    lrfPredicted = []
+    lrfOutput = []
+    comparePredicted = []
+    compareOutput = []
+    for i, data in enumerate(dataLoader):
+        images, labels = data
+        images, labels = images.to(device), labels.to(device)
+        # 加载LRF模型
+        checkpoint = torch.load(filePath + selectedLRFModel, map_location='cpu')
+        net.load_state_dict(checkpoint)
+        net.eval()
+        lrfOutput = net(images)
+        # 加载对照模型
+        checkpoint = torch.load(filePath + selectedCompareModel, map_location='cpu')
+        net.load_state_dict(checkpoint)
+        net.eval()
+        compareOutput = net(images)
+        break
+    with torch.no_grad():
+        for i, picItem in enumerate(pictures):
+            _, lrfPredicted = torch.max(lrfOutput.data, 1)
+            lrfVectorList = lrfOutput[i].cpu().numpy().tolist()
+            lrfVectorList = [round(j, 4) for j in lrfVectorList]
+            _, comparePredicted = torch.max(compareOutput.data, 1)
+            cmpVectorList = compareOutput[i].cpu().numpy().tolist()
+            cmpVectorList = [round(j, 4) for j in cmpVectorList]
+            item = {}
+            item['name'] = picItem
+            item['lrf_predict'] = lrfPredicted[i].item()
+            item['lrf_vector'] = lrfVectorList
+            item['compare_predict'] = comparePredicted[i].item()
+            item['compare_vector'] = cmpVectorList
+            results.append(item)
+            print(item)
+    resp = {'message': "success", 'result': 'ok', 'data': results}
+    return HttpResponse(json.dumps(resp), content_type="application/json")
+
+def uploadFile(request):
+    print(request.FILES['file'])
+    fileName = str(request.FILES['file'])
+    index, _ = fileName.split('.')
+    print(index)
+    print(int(index))
+    resp = {'message': "success", 'result': 'ok'}
+    resp['message'] = 'aaddDa'
+    resp['result'] = 'ok'
+    resp['data'] = "aaa"
+    return HttpResponse(json.dumps(resp), content_type="application/json")
+
 def getModelList(request):
     filePath = r'D:\www\defense-backend\backend\model'
     fileList = os.listdir(filePath)
@@ -106,6 +216,7 @@ def resetparam(request):
 
 
 def forgettrain(request):
+    start = time.time()
     print("forget train start")
     # 解析请求
     print(request.body)
@@ -159,7 +270,9 @@ def forgettrain(request):
                                     EPOCH, resetModel, device, optimizer, criterion, filePath, logName, pthName)
     if forgetTestAcc > 1:
         forgetTestAcc /= 100
-    resp = {'message': "forgettrain", 'result': 'ok', 'data': model}
+    end = time.time()
+    span = end - start
+    resp = {'message': "forgettrain", 'result': 'ok', 'data': model + "+++" + str(span)}
     return HttpResponse(json.dumps(resp), content_type="application/json")
 
 

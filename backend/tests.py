@@ -1,9 +1,10 @@
 from django.test import TestCase
 import math
 from views import getpoint
+from views import getPictureResult
 # Create your tests here.
 
-getpoint()
+getPictureResult()
 exit()
 
 # 二分寻找分层点
