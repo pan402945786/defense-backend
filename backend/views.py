@@ -31,6 +31,8 @@ cuda = torch.cuda.is_available()
 if cuda:
     print("torch.backends.cudnn.version: {}".format(torch.backends.cudnn.version()))
 
+rootPath = ''
+
 def hello(request):
     resp = {'message': "success", 'result': 'ok'}
     resp['message'] = 'aaddDa'
@@ -154,7 +156,8 @@ def uploadFile(request):
     return HttpResponse(json.dumps(resp), content_type="application/json")
 
 def getModelList(request):
-    filePath = r'D:\www\defense-backend\backend\model'
+    # filePath = r'D:\www\defense-backend\backend\model'
+    filePath = getFilerootName() + '/model'
     fileList = os.listdir(filePath)
     print(fileList)
     resp = {'message': "success", 'result': 'ok', 'data': fileList}
@@ -304,7 +307,9 @@ def getFilerootName():
     # testFile = r"\test_list_100.txt"
 
     # 自己电脑
-    fileRoot = r"D:\www\defense-backend\backend"
+    # fileRoot = r"D:\www\defense-backend\backend"
+    fileRoot = r"/home/defense-backend/backend"
+
     # fileRoot = r'D:\www\graduate_expriment\resnet18-mnist'
     # dataRoot = r'D:\www\graduate_expriment\resnet18_vggface2'
     # datasetRoot = r'\datasets\data\root'
