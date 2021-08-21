@@ -461,8 +461,8 @@ def train(net, trainloader, testloader, forgetTestLoader, frozenList, pre_epoch,
                 correct = 0.0
                 total = 0.0
                 for i, data in enumerate(trainloader, 0):
-                    # if i > len(trainloader) * 0.01:
-                    #     break
+                    if i > len(trainloader) * 0.01:
+                        break
                     # 准备数据
                     length = len(trainloader)
                     inputs, labels = data
