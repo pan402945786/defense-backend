@@ -104,6 +104,7 @@ def getPictureResult(request):
     lrfOutput = []
     comparePredicted = []
     compareOutput = []
+    sm = nn.Softmax()
     for i, data in enumerate(dataLoader):
         images, labels = data
         images, labels = images.to(device), labels.to(device)
@@ -121,11 +122,14 @@ def getPictureResult(request):
     with torch.no_grad():
         for i, picItem in enumerate(pictures):
             _, lrfPredicted = torch.max(lrfOutput.data, 1)
-            lrfVectorList = lrfOutput[i].cpu().numpy().tolist()
-            lrfVectorList = [round(j, 4) for j in lrfVectorList]
+            lrfVectorList = sm(lrfOutput[i].cpu().view(10)).numpy().tolist()
+            # lrfVectorList = lrfOutput[i].cpu().numpy().tolist()
+
+            # lrfVectorList = [round(j, 4) for j in lrfVectorList]
             _, comparePredicted = torch.max(compareOutput.data, 1)
-            cmpVectorList = compareOutput[i].cpu().numpy().tolist()
-            cmpVectorList = [round(j, 4) for j in cmpVectorList]
+            cmpVectorList = sm(compareOutput[i].cpu().view(10)).numpy().tolist()
+            # cmpVectorList = compareOutput[i].cpu().numpy().tolist()
+            # cmpVectorList = [round(j, 4) for j in cmpVectorList]
             item = {}
             item['name'] = picItem
             item['lrf_predict'] = lrfPredicted[i].item()
@@ -439,7 +443,7 @@ def train(net, trainloader, testloader, forgetTestLoader, frozenList, pre_epoch,
     # 训练
     print("Start Training, Resnet-18!")  # 定义遍历数据集的次数
     best_acc = 0
-    tolerate = 10
+    tolerate = 2
     saveModelSpan = 10
     T_threshold = 0.0111
     bestModelName = None
@@ -452,8 +456,8 @@ def train(net, trainloader, testloader, forgetTestLoader, frozenList, pre_epoch,
                 correct = 0.0
                 total = 0.0
                 for i, data in enumerate(trainloader, 0):
-                    if i > len(trainloader) * 0.01:
-                        break
+                    # if i > len(trainloader) * 0.01:
+                    #     break
                     # 准备数据
                     length = len(trainloader)
                     inputs, labels = data
