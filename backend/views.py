@@ -30,7 +30,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cuda = torch.cuda.is_available()
 if cuda:
     print("torch.backends.cudnn.version: {}".format(torch.backends.cudnn.version()))
-
+ 
 rootPath = ''
 
 def hello(request):
